@@ -1,0 +1,68 @@
+name: "wv3-rays"
+training:
+  resume: False  # If True, must set hydra.run.dir accordingly
+  pretrain_path: ""
+  experiments_root: ""
+  interval_visualize: 1000
+  interval_save_checkpoint: 5000
+  interval_delete_checkpoint: 10000
+  interval_evaluate: 10000
+  delete_all_checkpoints_after_training: False
+  lr: 1e-4
+  mixed_precision: True
+  matmul_precision: high 
+  max_iterations: 100000  # 2000000
+  batch_size: 64
+  num_workers: 8
+  gpu_id: 0
+  freeze_encoder: True
+  seed: 0
+  job_key: ""  # Use this for submitit sweeps where timestamps might collide
+  translation_scale: 1.0
+  regression: False
+  prob_unconditional: 0
+  load_extra_cameras: True
+  calculate_intrinsics: False
+  normalize_first_camera: False
+  unit_normalize_moments: False
+  val_preq: !!float 1e3
+
+val:
+  batch_size: 64
+
+model:
+  pred_x0: False
+  reweight_eps_loss: False
+  model_type: dit
+  num_patches_x: 16
+  num_patches_y: 16
+  pred_direction_only: False
+  depth: 16
+  num_images: 1
+  random_num_images: False
+  feature_extractor: dino
+  within_image: False
+
+noise_scheduler:
+  type: linear
+  max_timesteps: 100
+  beta_start: 0.0001
+  beta_end: 0.2
+
+dataset:
+  name: wv3
+  root: /root/autodl-fs/ztt/satdata/pansharp/grss2019/
+  
+
+debug:
+  wandb: True
+  project_name: ba_rays
+
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 1e3
+
+hydra:
+  run:
+    dir: ./output/${now:%m%d_%H%M%S_%f}${training.job_key}
+  output_subdir: hydra
