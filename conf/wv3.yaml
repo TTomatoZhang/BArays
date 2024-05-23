@@ -1,8 +1,9 @@
 name: "wv3-rays"
+
 training:
   resume: False  # If True, must set hydra.run.dir accordingly
   pretrain_path: ""
-  experiments_root: ""
+  experiments_root: "/root/autodl-fs/ztt/unify_camera/barays_results/wv3"
   interval_visualize: 1000
   interval_save_checkpoint: 5000
   interval_delete_checkpoint: 10000
@@ -12,8 +13,8 @@ training:
   mixed_precision: True
   matmul_precision: high 
   max_iterations: 100000  # 2000000
-  batch_size: 64
-  num_workers: 8
+  batch_size: 1 # 64
+  num_workers: 0  # 8
   gpu_id: 0
   freeze_encoder: True
   seed: 0
@@ -26,9 +27,17 @@ training:
   normalize_first_camera: False
   unit_normalize_moments: False
   val_preq: !!float 1e3
-
+  weight_decay: !!float 4e-5
+  lr: !!float 4e-5
+  lr_scheme: TrueCosineAnnealingLR
+  beta1: 0.9
+  beta2: 0.99
+  lr_steps: [200000, 300000, 400000]
+  lr_gamma: 0.5
+  eta_min: !!float 1e-7
+  
 val:
-  batch_size: 64
+  batch_size: 1 # 64
 
 model:
   pred_x0: False
@@ -42,6 +51,8 @@ model:
   random_num_images: False
   feature_extractor: dino
   within_image: False
+  dinoroot: "/root/autodl-pub/ZTT/pretrained/dinov2/ckpt"
+  dinopath: "dinov2_vitb14_pretrain.pth" # "dinov2_vits14_pretrain.pth"
 
 noise_scheduler:
   type: linear
@@ -53,6 +64,11 @@ dataset:
   name: wv3
   root: /root/autodl-fs/ztt/satdata/pansharp/grss2019/
   
+path:
+  pretrain_model_G: ~
+  strict_load: true
+  resume_state: 
+  it_state: ~
 
 debug:
   wandb: True
@@ -66,3 +82,4 @@ hydra:
   run:
     dir: ./output/${now:%m%d_%H%M%S_%f}${training.job_key}
   output_subdir: hydra
+

@@ -151,6 +151,7 @@ dmypy.json
 pretrained/
 experiments/
 results/
+log/
 logs/
 sde_state/
 *.log

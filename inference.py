@@ -2,7 +2,7 @@ import ipdb  # noqa: F401
 import torch
 from tqdm.auto import tqdm
 
-from ray_diffusion.utils.rays import compute_coordinates
+from utils.rays import compute_coordinates
 
 rescale_fn = {
     "zero": lambda x: 0,

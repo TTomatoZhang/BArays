@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ray_diffusion.utils.visualization import plot_to_image
+from utils.visualization import plot_to_image
 
 
 class NoiseScheduler(nn.Module):

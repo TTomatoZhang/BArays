@@ -244,7 +244,7 @@ def dsm_pointwise_diff(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None
         if os.path.exists(out_rdsm_path):
             os.remove(out_rdsm_path)
         os.makedirs(os.path.dirname(out_rdsm_path), exist_ok=True)
-        shutil.copyfile(pred_rdsm_path, out_rdsm_path)
+        shutils.copyfile(pred_rdsm_path, out_rdsm_path)
     os.remove(pred_rdsm_path)
     if out_err_path is not None:
         if os.path.exists(out_err_path):

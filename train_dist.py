@@ -14,7 +14,7 @@ import torch.multiprocessing as mp
 # from IPython import embed
 
 import options as option
-from model.diffuser import RayDiffuser
+from model.RayDiffusionModel import RayDiffuser
 # from utils.img_utils import writedemTensor2img, tensor2img
 
 
@@ -78,7 +78,7 @@ def main():
             torch.distributed.get_world_size()
         )  # Returns the number of processes in the current process group
         rank = torch.distributed.get_rank()  # Returns the rank of current process group
-        # util.set_random_seed(seed)
+        # utils.set_random_seed(seed)
 
     torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
@@ -101,10 +101,10 @@ def main():
     if rank <= 0:  # normal training (rank -1) OR distributed training (rank 0-7)
         if resume_state is None:
             # Predictor path
-            util.mkdir_and_rename(
+            utils.mkdir_and_rename(
                 opt["path"]["experiments_root"]
             )  # rename experiment folder if exists
-            util.mkdirs(
+            utils.mkdirs(
                 (
                     path
                     for key, path in opt["path"].items()
@@ -117,7 +117,7 @@ def main():
             # os.symlink(os.path.join(opt["path"]["experiments_root"], ".."), "./log")
 
         # config loggers. Before it, the log will not work
-        util.setup_logger(
+        utils.setup_logger(
             "base",
             opt["path"]["log"],
             "train_" + opt["name"],
@@ -125,7 +125,7 @@ def main():
             screen=False,
             tofile=True,
         )
-        util.setup_logger(
+        utils.setup_logger(
             "val",
             opt["path"]["log"],
             "val_" + opt["name"],
@@ -149,7 +149,7 @@ def main():
                 from tensorboardX import SummaryWriter
             tb_logger = SummaryWriter(log_dir="log/{}/tb_logger/".format(opt["name"]))
     else:
-        util.setup_logger(
+        utils.setup_logger(
             "base", opt["path"]["log"], "train", level=logging.INFO, screen=False
         )
         logger = logging.getLogger("base")
@@ -223,7 +223,7 @@ def main():
         current_step = 0
         start_epoch = 0
 
-    sde = util.IRSDE(max_sigma=opt["sde"]["max_sigma"], T=opt["sde"]["T"], schedule=opt["sde"]["schedule"], eps=opt["sde"]["eps"], device=device)
+    sde = utils.IRSDE(max_sigma=opt["sde"]["max_sigma"], T=opt["sde"]["T"], schedule=opt["sde"]["schedule"], eps=opt["sde"]["eps"], device=device)
     sde.set_model(model.model)
 
     scale = opt['degradation']['scale']
@@ -251,7 +251,7 @@ def main():
 
             LQ, GT = train_data["LQ"], train_data["GT"]  #  b 3 32 32; b 3 128 128
 
-            # LQ = util.upscale(LQ, scale)  #  这里可以改，改成一个由x1的SR的模块先处理， 现在是bicubic上采样
+            # LQ = utils.upscale(LQ, scale)  #  这里可以改，改成一个由x1的SR的模块先处理， 现在是bicubic上采样
 
             # 用SDE规则随机生成四个时间点timestep，以及这四个点对应的状态图state （也就是加了噪声的图）
             timesteps, states = sde.generate_random_states(x0=GT, mu=LQ)  # 时间点=batchsize，states [b 3 128 128]
@@ -292,19 +292,19 @@ def main():
                     model.test(sde)
                     visuals = model.get_current_visuals()
 
-                    output = util.tensor2img(visuals["Output"].squeeze())  # uint8
-                    gt_img = util.tensor2img(visuals["GT"].squeeze())  # uint8
+                    output = utils.tensor2img(visuals["Output"].squeeze())  # uint8
+                    gt_img = utils.tensor2img(visuals["GT"].squeeze())  # uint8
                     # save the validation results
                     save_path = str(opt["path"]["experiments_root"]) + '/val_images/' + str(current_step)
-                    util.mkdirs(save_path)
+                    utils.mkdirs(save_path)
                     save_name = save_path + '/'+'{0:03d}'.format(idx) + '.jpg'
-                    # util.save_img(output, save_name)
+                    # utils.save_img(output, save_name)
                     
-                    util.writedemTensor2img(visuals["Output"].squeeze(), save_name)
+                    utils.writedemTensor2img(visuals["Output"].squeeze(), save_name)
 
 
                     # calculate PSNR
-                    avg_psnr += util.calculate_psnr(output, gt_img)
+                    avg_psnr += utils.calculate_psnr(output, gt_img)
                     idx += 1
 
                 avg_psnr = avg_psnr / idx

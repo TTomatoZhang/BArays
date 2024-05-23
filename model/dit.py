@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from timm.models.vision_transformer import Attention, Mlp, PatchEmbed
-from ray_diffusion.model.memory_efficient_attention import MEAttention
+from model.memory_efficient_attention import MEAttention
 
 
 def modulate(x, shift, scale):
