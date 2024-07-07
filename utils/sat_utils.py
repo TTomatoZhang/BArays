@@ -15,12 +15,100 @@ import pyproj
 from typing import NamedTuple
 from PIL import Image
 from torchvision import transforms as T
+from models.base.functools import lru_cache
+
+def load_rpc_tensor_from_geotiff(img_path, downscale_factor=1, return_model=False):
+    if os.path.exists(img_path) is False:
+        print("Error#001: cann't find " + img_path + " in the file system!")
+        return
+    with rasterio.open(img_path) as f:
+        rpcmodel = rpcm.RPCModel(f.tags(ns='RPC'), dict_format="geotiff")
+    
+    if return_model:
+        return rpcmodel
+    else:
+        rpc = rpcmodel.__dict__
+        line_off = rpc['row_offset'] / downscale_factor
+        samp_off = rpc['col_offset'] / downscale_factor
+        line_scale = rpc['row_scale'] / downscale_factor
+        samp_scale = rpc['col_scale'] / downscale_factor
+
+        data = [
+                line_off,  # 0: line_off
+                samp_off,  # 1: samp_off
+                rpc['lat_offset'],  # 2: lat_off
+                rpc['lon_offset'],  # 3: lon_off
+                rpc['alt_offset'],  # 4: alt_off
+                line_scale,  # 5: line_scale
+                samp_scale,  # 6: samp_scale
+                rpc['lat_scale'],  # 7: lat_scale
+                rpc['lon_scale'],  # 8: lon_scale
+                rpc['alt_scale']  # 9: alt_scale
+                ]
+
+        data.extend(rpc['row_num'])   # 10:30
+        data.extend(rpc['row_den'])    # 30:50
+        data.extend(rpc['col_num'])    # 40:70
+        data.extend(rpc['col_den'])    # 70:90
 
 
-class BasicPointCloud(NamedTuple):
-    points : np.array
-    colors : np.array
-    normals : np.array
+        # print(data)
+        data = np.array(data, dtype=np.float64)
+        data = torch.from_numpy(data)
+        return data
+
+def load_tensor_from_geotiff(img_path, downscale_factor, 
+                             return_range=True,
+                             normalize=True,
+                             imethod=Image.BICUBIC):
+    
+    with rasterio.open(img_path) as f:
+        data = np.transpose(f.read(), (1, 2, 0)).astype(np.float32) 
+        h, w = f.height, f.width
+        rpc_d = f.rpcs.to_dict()
+        
+    data = np.transpose(data, (2, 0, 1))
+    if downscale_factor > 1:
+        w = int(w // downscale_factor)
+        h = int(h // downscale_factor)
+        # data = np.transpose(data, (2, 0, 1))
+
+        data = T.Resize(size=(h, w), interpolation=imethod)(torch.Tensor(data))
+        # data = np.transpose(data.numpy(), (1, 2, 0))
+    elif downscale_factor < 1:
+        # upscale
+        w = int(w * (1 / downscale_factor))
+        h = int(h * (1 / downscale_factor))
+        # data = np.transpose(data, (2, 0, 1))
+        data = T.Resize(size=(h, w), interpolation=imethod)(torch.Tensor(data))
+    else:
+        data = torch.Tensor(data)
+
+    dmax, dmin = data.max(), data.min()
+    if normalize:
+
+        data = (data - dmin) / (dmax - dmin)
+    mscs = data.unsqueeze(0)    #.view(-1, n_band)  # (h*w, nband)
+    if return_range:
+        return mscs, dmax, dmin 
+    else:
+        return mscs
+
+
+def load_rpcmodel_tensor_from_json(filepath):
+    """
+    Read the direct and inverse rpc from a file
+    :param filepath:
+    :return:
+    """
+    if os.path.exists(filepath) is False:
+        print("Error#001: can't find " + filepath + " in the file system!")
+        return
+    with open(filepath) as f:
+        d = json.load(f)
+    d_rpc = d["rpc"]
+    rpc_m = rpcm.RPCModel(d_rpc, dict_format="geotiff")
+    return rpc_m
 
 
 def get_tensor_from_rpc(rpc):
@@ -50,6 +138,15 @@ def get_file_id(filename):
     return os.path.splitext(os.path.basename(filename))[0]
 
 
+def read_dict_from_txt(input_path):
+    with open(input_path) as f:
+        d = json.loads(f.read())
+    
+    # with open(input_path) as f:
+    #     d = json.load(f)    
+    return d
+
+
 def read_dict_from_json(input_path):
     with open(input_path) as f:
         d = json.load(f)
@@ -71,6 +168,7 @@ def rpc_scaling_params(v):
     offset = vec.min() + scale
     return scale, offset
 
+
 def rescale_rpc(rpc, alpha):
     """
     Scale a rpc model following an image resize
@@ -89,6 +187,28 @@ def rescale_rpc(rpc, alpha):
     rpc_scaled.col_scale *= float(alpha)
     rpc_scaled.row_offset *= float(alpha)
     rpc_scaled.col_offset *= float(alpha)
+    return rpc_scaled
+
+def rescale_rpc_batch(rpcs, alpha):
+    """
+    Scale a rpc model following an image resize
+    Args:
+        rpc: rpc model to scale
+        alpha: resize factor
+               e.g. 2 if the image is upsampled by a factor of 2
+                    1/2 if the image is downsampled by a factor of 2
+    Returns:
+        rpc_scaled: the scaled version of P by a factor alpha
+    """
+    import copy
+    rpcs_scaled = []
+    for rpc in rpcs:
+        rpc_scaled = copy.copy(rpc)
+        rpc_scaled.row_scale *= float(alpha)
+        rpc_scaled.col_scale *= float(alpha)
+        rpc_scaled.row_offset *= float(alpha)
+        rpc_scaled.col_offset *= float(alpha)
+        rpcs_scaled.append(rpc)
     return rpc_scaled
 
 def latlon_to_ecef_custom(lat, lon, alt):
@@ -435,6 +555,7 @@ def load_tensor_from_rgb_geotiff(img_path, downscale_factor, imethod=Image.BICUB
     rgbs = rgbs.type(torch.FloatTensor)
     return rgbs
 
+
 def init_scaling_params(rgb_dir, out_dir, img_downscale=1):
     print("Could not find a scene.loc file in the root directory, creating one...")
     print("Warning: this can take some minutes")
@@ -467,6 +588,7 @@ def init_scaling_params(rgb_dir, out_dir, img_downscale=1):
     
     print("... finish initing scale params !")
     return d
+
 
 def init_points(rgb_dir, cache_dir,  N_samples=32, img_downscale=1):
     print("Could not find a scene.loc file in the root directory, creating one...")
@@ -525,53 +647,167 @@ def init_points(rgb_dir, cache_dir,  N_samples=32, img_downscale=1):
     np.save(points_dir, xyz)
     print("... finish caching the points edges !")
 
-def get_rays(cols, rows, rpc, min_alt, max_alt):
+@lru_cache(maxsize=None)
+def meshgrid(B, H, W, dtype, device, normalized=False):
     """
-            Draw a set of rays from a satellite image
-            Each ray is defined by an origin 3d point + a direction vector
-            First the bounds of each ray are found by localizing each pixel at min and max altitude
-            Then the corresponding direction vector is found by the difference between such bounds
-            Args:
-                cols: 1d array with image column coordinates
-                rows: 1d array with image row coordinates
-                rpc: RPC model with the localization function associated to the satellite image
-                min_alt: float, the minimum altitude observed in the image
-                max_alt: float, the maximum altitude observed in the image
-            Returns:
-                rays: (h*w, 8) tensor of floats encoding h*w rays
-                      columns 0,1,2 correspond to the rays origin
-                      columns 3,4,5 correspond to the direction vector
-                      columns 6,7 correspond to the distance of the ray bounds with respect to the camera
-            """
+    Create meshgrid with a specific resolution
 
-    min_alts = float(min_alt) * np.ones(cols.shape)
-    max_alts = float(max_alt) * np.ones(cols.shape)
+    Parameters
+    ----------
+    B : int
+        Batch size
+    H : int
+        Height size
+    W : int
+        Width size
+    dtype : torch.dtype
+        Meshgrid type
+    device : torch.device
+        Meshgrid device
+    normalized : bool
+        True if grid is normalized between -1 and 1
 
-    # assume the points of maximum altitude are those closest to the camera
-    lons_high, lats_high = rpc.localization(cols, rows, max_alts)
-    x_near, y_near, z_near = latlon_to_ecef_custom(lats_high, lons_high, max_alts)
-    xyz_near = np.vstack([x_near, y_near, z_near]).T
+    Returns
+    -------
+    xs : torch.Tensor [B,1,W]
+        Meshgrid in dimension x
+    ys : torch.Tensor [B,H,1]
+        Meshgrid in dimension y
+    """
+    if normalized:
+        xs = torch.linspace(-1, 1, W, device=device, dtype=dtype)
+        ys = torch.linspace(-1, 1, H, device=device, dtype=dtype)
+    else:
+        xs = torch.linspace(0, W-1, W, device=device, dtype=dtype)
+        ys = torch.linspace(0, H-1, H, device=device, dtype=dtype)
+    ys, xs = custom_meshgrid([ys, xs]) # torch.meshgrid([ys, xs])
+    return xs.repeat([B, 1, 1]), ys.repeat([B, 1, 1])
 
-    # similarly, the points of minimum altitude are the furthest away from the camera
-    lons_low, lats_low = rpc.localization(cols, rows, min_alts)
-    x_far, y_far, z_far = latlon_to_ecef_custom(lats_low, lons_low, min_alts)
-    xyz_far = np.vstack([x_far, y_far, z_far]).T
+def custom_meshgrid(*args):
+    # ref: https://pytorch.org/docs/stable/generated/torch.meshgrid.html?highlight=meshgrid#torch.meshgrid
+    if pver.parse(torch.__version__) < pver.parse('1.10'):
+        return torch.meshgrid(*args)
+    else:
+        return torch.meshgrid(*args, indexing='ij')
 
-    # define the rays origin as the nearest point coordinates
-    rays_o = xyz_near
+@lru_cache(maxsize=None)
+def image_grid(B, H, W, dtype, device, normalized=False):
+    """
+    Create an image grid with a specific resolution
 
-    # define the unit direction vector
-    d = xyz_far - xyz_near
-    rays_d = d / np.linalg.norm(d, axis=1)[:, np.newaxis]
+    Parameters
+    ----------
+    B : int
+        Batch size
+    H : int
+        Height size
+    W : int
+        Width size
+    dtype : torch.dtype
+        Meshgrid type
+    device : torch.device
+        Meshgrid device
+    normalized : bool
+        True if grid is normalized between -1 and 1
 
-    # assume the nearest points are at distance 0 from the camera
-    # the furthest points are at distance Euclidean distance(far - near)
-    fars = np.linalg.norm(d, axis=1)
-    nears = float(0) * np.ones(fars.shape)
+    Returns
+    -------
+    grid : torch.Tensor [B,3,H,W]
+        Image grid containing a meshgrid in x, y and 1
+    """
+    xs, ys = meshgrid(B, H, W, dtype, device, normalized=normalized)
+    ones = torch.ones_like(xs)
+    grid = torch.stack([xs, ys, ones], dim=1)
+    return grid
 
-    # create a stack with the rays origin, direction vector and near-far bounds
-    rays = np.float32(np.hstack([rays_o, rays_d, nears[:, np.newaxis], fars[:, np.newaxis]]))   # .to(np.float32)
-    return rays
+def sample_points_from_depth(self, depth):  
+    if depth.ndim == 3:
+        C, H, W = depth.shape
+        B = 1
+    elif depth.ndim == 4:
+        B, C, H, W = depth.shape
+    else:
+        H, W = depth.shape
+        B = 1
+        C = 1
+    # print(f'depth shape: {depth.shape}')
+    assert C == 1        
+    # Create flat index grid
+    grid = image_grid(B, H, W, depth.dtype, depth.device, normalized=False)  # [B,3,H,W]
+    Xw = grid * depth # [B, 3, H, W] * [B, 1, H, W]
 
+    Xw = Xw.reshape(B, 3, -1)
 
+    return Xw
 
+def GetXYHfromAltitudes(H, W, alt_sample, rpc):
+    """
+    Generate src-view planes 3D position XYH
+    Args:
+        H: rendered image height, type:int
+        W: rendered image width, type:int
+        alt_sample: altitude sample in src-view, corresponding to MPI planes' Z, type:torch.Tensor, shape:[B, Nsample]
+        rpc: [170,]
+
+    Returns:
+        XYH_src: 3D position in src-RPC, type:torch.Tensor, shape:[B, Nsample, 3, H, W]
+
+    """
+    device = rpc.device
+    # generate meshgrid for src-view.
+    B, Nsample = alt_sample.shape
+    alt_sample = alt_sample.view(B * Nsample).to(device)
+
+    y, x = torch.meshgrid([torch.arange(0, H, dtype=torch.double, device=device),
+                           torch.arange(0, W, dtype=torch.double, device=device)])
+    y, x = y.contiguous(), x.contiguous()
+    z = torch.ones_like(x)  # cpu
+
+    meshgrid_flat = torch.stack((x, y, z), dim=2).to(device)  # [H, W, 3]
+
+    meshgrid = meshgrid_flat.unsqueeze(0).repeat(B*Nsample, 1, 1, 1).reshape(B*Nsample, H, W, 3).permute(1, 2, 3, 0)  # [H, W, 3, 32]
+    meshgrid[:, :, 2, :] = meshgrid[:, :, 2, :] * alt_sample
+
+    #meshgrid = meshgrid.contiguous().view(H*W*B*Nsample, 3)
+
+    ''' 
+    meshgrid0 = meshgrid.permute(3, 0, 1, 2)
+    meshgrid1 = meshgrid0[5:10, :, :, :]
+    meshgrid2 = meshgrid1.contiguous().view(-1, 3)
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    mpl.rcParams['agg.path.chunksize'] = 10000
+    xyh = meshgrid2.detach().cpu().numpy()
+    # xyh = xyh.reshape(-1, 3).detach().cpu().numpy()
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.plot3D(xyh[:, 0], xyh[:, 1], xyh[:, 2], 'gray')
+    fig.show()
+
+    '''
+    # line off [0], samp off [1], line scale[5], samp off [6]
+    # todo: test whether need normalization
+    # meshgrid[:, 0] -= rpc[1]  # sampoff
+    # meshgrid[:, 1] -= rpc[0]  # lineoff
+    # meshgrid[:, 0] /= rpc[6]
+    # meshgrid[:, 1] /= rpc[5]
+
+    # expand to Nsamples of depth level # [H, W, 3, 32]
+    XYH_src = meshgrid.permute(3, 2, 0, 1).contiguous().view(B, Nsample, 3, H, W)  # [B, Nsample, 3, H, W] # right
+                                                                  #[1, 32, 3, 262144], [1, 32, 1, 1]
+    # for plot
+    '''
+    import numpy as np
+    import matplotlib.pyplot as plt
+    ndepth = XYH_src.shape[1]
+    XYZ = XYH_src.squeeze().view(ndepth, 3, -1).permute(0, 2, 1).detach().cpu().numpy()
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    for i in range(ndepth):
+        xyh = XYZ[i, :, :]
+        ax.plot3D(xyh[:, 0], xyh[:, 1], xyh[:, 2], 'gray')
+    # xyh = meshgrid.reshape(-1, 3).detach().cpu().numpy()
+    fig.show()
+    '''
+    return XYH_src

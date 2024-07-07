@@ -23,7 +23,6 @@ training:
   regression: False
   prob_unconditional: 0
   load_extra_cameras: True
-  calculate_intrinsics: False
   normalize_first_camera: False
   unit_normalize_moments: False
   val_preq: !!float 1e3

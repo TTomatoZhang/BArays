@@ -1,6 +1,6 @@
 import math
 import os
-
+import shutil
 import cv2
 import numpy as np
 import torch
@@ -16,6 +16,12 @@ try:
 except ImportError:
     accimage = None
 
+
+import matplotlib as mpl
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from matplotlib import cm
+from datetime import datetime
 
 def _is_pil_image(img):
     if accimage is not None:
@@ -204,90 +210,160 @@ def img2tensor(img):
     return img
 
 
-def calculate_mse(img1, img2):
-    img1 = img1.astype(np.float64)
-    img2 = img2.astype(np.float64)
-    mse = np.mean((img1 - img2) ** 2)   
-    return mse
+HUGE_NUMBER = 1e10
+TINY_NUMBER = 1e-6      # float32 only has 7 decimal digits precision
+
+img_HWC2CHW = lambda x: x.permute(2, 0, 1)
+gray2rgb = lambda x: x.unsqueeze(2).repeat(1, 1, 3)
 
 
-def calculate_psnr_(img1, img2):
-    # img1 and img2 have range [0, 255]
-    img1 = img1.astype(np.float64)
-    img2 = img2.astype(np.float64)
-    mse = np.mean((img1 - img2) ** 2)
-    if mse == 0:
-        return float("inf")
-    return 20 * math.log10(255.0 / math.sqrt(mse))
+to8b = lambda x: (255 * np.clip(x, 0, 1)).astype(np.uint8)
+mse2psnr = lambda x: -10. * np.log(x+TINY_NUMBER) / np.log(10.)
 
 
-def calculate_psnr(img1, img2):
-    # img1 and img2 have range [0, 255]
-    img1 = img1.astype(np.float64)
-    img2 = img2.astype(np.float64)
-    mse = np.mean((img1 - img2) ** 2)
-    if mse == 0:
-        return float("inf")
-    return 20 * math.log10(255.0 / math.sqrt(mse))
+def save_current_code(outdir):
+    now = datetime.now()  # current date and time
+    date_time = now.strftime("%m_%d-%H:%M:%S")
+    src_dir = '.'
+    dst_dir = os.path.join(outdir, 'code_{}'.format(date_time))
+    shutil.copytree(src_dir, dst_dir,
+                    ignore=shutil.ignore_patterns('data*', 'pretrained*', 'logs*', 'out*', '*.png', '*.mp4',
+                                                  '*__pycache__*', '*.git*', '*.idea*', '*.zip', '*.jpg'))
 
 
-def calculate_mae(img1, img2):
-    out = np.abs(img1 - img2).mean()
-    return out
+def img2mse(x, y, mask=None):
+    '''
+    :param x: img 1, [(...), 3]
+    :param y: img 2, [(...), 3]
+    :param mask: optional, [(...)]
+    :return: mse score
+    '''
 
-
-def calculate_mse(img1, img2):
-    out = ((img1 - img2)**2).mean()
-    return out
-
-
-def calculate_rmse(img1, img2):
-    out = (((img1 - img2)**2).mean())**0.5 
-    return out
-
-
-def ssim(img1, img2):
-    C1 = (0.01 * 255) ** 2
-    C2 = (0.03 * 255) ** 2
-
-    img1 = img1.astype(np.float64)
-    img2 = img2.astype(np.float64)
-    kernel = cv2.getGaussianKernel(11, 1.5)
-    window = np.outer(kernel, kernel.transpose())
-
-    mu1 = cv2.filter2D(img1, -1, window)[5:-5, 5:-5]  # valid
-    mu2 = cv2.filter2D(img2, -1, window)[5:-5, 5:-5]
-    mu1_sq = mu1 ** 2
-    mu2_sq = mu2 ** 2
-    mu1_mu2 = mu1 * mu2
-    sigma1_sq = cv2.filter2D(img1 ** 2, -1, window)[5:-5, 5:-5] - mu1_sq
-    sigma2_sq = cv2.filter2D(img2 ** 2, -1, window)[5:-5, 5:-5] - mu2_sq
-    sigma12 = cv2.filter2D(img1 * img2, -1, window)[5:-5, 5:-5] - mu1_mu2
-
-    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / (
-        (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
-    )
-    return ssim_map.mean()
-
-
-def calculate_ssim(img1, img2):
-    """calculate SSIM
-    the same outputs as MATLAB's
-    img1, img2: [0, 255]
-    """
-    if not img1.shape == img2.shape:
-        raise ValueError("Input images must have the same dimensions.")
-    if img1.ndim == 2:
-        return ssim(img1, img2)
-    elif img1.ndim == 3:
-        if img1.shape[2] == 3:
-            ssims = []
-            for i in range(3):
-                ssims.append(ssim(img1, img2))
-            return np.array(ssims).mean()
-        elif img1.shape[2] == 1:
-            return ssim(np.squeeze(img1), np.squeeze(img2))
+    if mask is None:
+        return torch.mean((x - y) * (x - y))
     else:
-        raise ValueError("Wrong input image dimensions.")
+        return torch.sum((x - y) * (x - y) * mask.unsqueeze(-1)) / (torch.sum(mask) * x.shape[-1] + TINY_NUMBER)
 
+
+def img2psnr(x, y, mask=None):
+    return mse2psnr(img2mse(x, y, mask).item())
+
+
+def cycle(iterable):
+    while True:
+        for x in iterable:
+            yield x
+
+
+def get_vertical_colorbar(h, vmin, vmax, cmap_name='jet', label=None, cbar_precision=2):
+    '''
+    :param w: pixels
+    :param h: pixels
+    :param vmin: min value
+    :param vmax: max value
+    :param cmap_name:
+    :param label
+    :return:
+    '''
+    fig = Figure(figsize=(2, 8), dpi=100)
+    fig.subplots_adjust(right=1.5)
+    canvas = FigureCanvasAgg(fig)
+
+    # Do some plotting.
+    ax = fig.add_subplot(111)
+    cmap = cm.get_cmap(cmap_name)
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+
+    tick_cnt = 6
+    tick_loc = np.linspace(vmin, vmax, tick_cnt)
+    cb1 = mpl.colorbar.ColorbarBase(ax, cmap=cmap,
+                                    norm=norm,
+                                    ticks=tick_loc,
+                                    orientation='vertical')
+
+    tick_label = [str(np.round(x, cbar_precision)) for x in tick_loc]
+    if cbar_precision == 0:
+        tick_label = [x[:-2] for x in tick_label]
+
+    cb1.set_ticklabels(tick_label)
+
+    cb1.ax.tick_params(labelsize=18, rotation=0)
+
+    if label is not None:
+        cb1.set_label(label)
+
+    fig.tight_layout()
+
+    canvas.draw()
+    s, (width, height) = canvas.print_to_buffer()
+
+    im = np.frombuffer(s, np.uint8).reshape((height, width, 4))
+
+    im = im[:, :, :3].astype(np.float32) / 255.
+    if h != im.shape[0]:
+        w = int(im.shape[1] / im.shape[0] * h)
+        im = cv2.resize(im, (w, h), interpolation=cv2.INTER_AREA)
+
+    return im
+
+
+def colorize_np(x, cmap_name='jet', mask=None, range=None, append_cbar=False, cbar_in_image=False, cbar_precision=2):
+    '''
+    turn a grayscale image into a color image
+    :param x: input grayscale, [H, W]
+    :param cmap_name: the colorization method
+    :param mask: the mask image, [H, W]
+    :param range: the range for scaling, automatic if None, [min, max]
+    :param append_cbar: if append the color bar
+    :param cbar_in_image: put the color bar inside the image to keep the output image the same size as the input image
+    :return: colorized image, [H, W]
+    '''
+    if range is not None:
+        vmin, vmax = range
+    elif mask is not None:
+        # vmin, vmax = np.percentile(x[mask], (2, 100))
+        vmin = np.min(x[mask][np.nonzero(x[mask])])
+        vmax = np.max(x[mask])
+        # vmin = vmin - np.abs(vmin) * 0.01
+        x[np.logical_not(mask)] = vmin
+        # print(vmin, vmax)
+    else:
+        vmin, vmax = np.percentile(x, (1, 100))
+        vmax += TINY_NUMBER
+
+    x = np.clip(x, vmin, vmax)
+    x = (x - vmin) / (vmax - vmin)
+    # x = np.clip(x, 0., 1.)
+
+    cmap = cm.get_cmap(cmap_name)
+    x_new = cmap(x)[:, :, :3]
+
+    if mask is not None:
+        mask = np.float32(mask[:, :, np.newaxis])
+        x_new = x_new * mask + np.ones_like(x_new) * (1. - mask)
+
+    cbar = get_vertical_colorbar(h=x.shape[0], vmin=vmin, vmax=vmax, cmap_name=cmap_name, cbar_precision=cbar_precision)
+
+    if append_cbar:
+        if cbar_in_image:
+            x_new[:, -cbar.shape[1]:, :] = cbar
+        else:
+            x_new = np.concatenate((x_new, np.zeros_like(x_new[:, :5, :]), cbar), axis=1)
+        return x_new
+    else:
+        return x_new
+
+
+# tensor
+def colorize(x, cmap_name='jet', mask=None, range=None, append_cbar=False, cbar_in_image=False):
+    device = x.device
+    x = x.cpu().numpy()
+    if mask is not None:
+        mask = mask.cpu().numpy() > 0.99
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.erode(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
+
+    x = colorize_np(x, cmap_name, mask, range, append_cbar, cbar_in_image)
+    x = torch.from_numpy(x).to(device)
+    return x
 

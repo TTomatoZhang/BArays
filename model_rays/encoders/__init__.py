@@ -1,9 +1,9 @@
 import torch
 import os
-from model.encoders.encoder_mae import mae_vit_base_patch16, mae_vit_large_patch16
-from model.encoders.encoder_mae_group_channel import mae_vit_base_patch16_gc, mae_vit_large_patch16_gc
-from model.encoders.encoder_vit import vit_base_patch16, vit_large_patch16
-from model.encoders.encoder_vit_group_channel import vit_base_patch16_gc, vit_large_patch16_gc
+from model_rays.encoders.encoder_mae import mae_vit_base_patch16, mae_vit_large_patch16
+from model_rays.encoders.encoder_mae_group_channel import mae_vit_base_patch16_gc, mae_vit_large_patch16_gc
+from model_rays.encoders.encoder_vit import vit_base_patch16, vit_large_patch16
+from model_rays.encoders.encoder_vit_group_channel import vit_base_patch16_gc, vit_large_patch16_gc
 
 # 768. 1024, 1280
 def load_satvit_model(model_type, pretrained_root, **kwargs):

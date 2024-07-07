@@ -91,7 +91,6 @@ def load_gray_tensor_maxmin_from_geotiff(img_path):
     gray = gray.type(torch.FloatTensor)
     return gray, max_h, min_h
 
-
 def load_gray_tensor_maxmin_from_geotiff_eq(img_path):
     with rasterio.open(img_path, 'r') as f:
         im = f.read()
@@ -146,22 +145,6 @@ def load_aug_rpc_tensor_from_txt(filepath):
     data = np.array(data, dtype=np.float32)
     data = torch.from_numpy(data)
     return data
-
-def load_rpcmodel_tensor_from_json(filepath):
-    """
-    Read the direct and inverse rpc from a file
-    :param filepath:
-    :return:
-    """
-    if os.path.exists(filepath) is False:
-        print("Error#001: can't find " + filepath + " in the file system!")
-        return
-    with open(filepath) as f:
-        d = json.load(f)
-    d_rpc = d["rpc"]
-    rpc_m = rpcm.RPCModel(d_rpc, dict_format="geotiff")
-    return rpc_m
-
 
 def GetH_MAX_MIN(rpc):
     """

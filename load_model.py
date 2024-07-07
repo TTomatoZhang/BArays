@@ -4,8 +4,8 @@ from glob import glob
 import torch
 from omegaconf import OmegaConf
 
-from model.bk_RayDiffusionModel import RayDiffuser
-from model.scheduler import NoiseScheduler
+from model_rays.bk_RayDiffusionModel import RayDiffuser
+from model_rays.scheduler import NoiseScheduler
 
 
 def load_model(

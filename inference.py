@@ -144,7 +144,7 @@ def inference_ddpm(
             if visualize:
                 x_ts.append(x_t.detach().clone())
 
-    # For visualization purposes, tack gt onto end
+    # For visualization, tack gt onto end
     if visualize:
         return x_t, x_ts, all_pred, noise_samples
     return x_t
